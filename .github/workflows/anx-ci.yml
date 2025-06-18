@@ -1,0 +1,90 @@
+on:
+  push:
+    branches:
+      - anx-prod
+      - staging
+  pull_request:
+    branches:
+      - "**"
+
+name: anx-ci
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: ["1.24.x"]
+        platform: [ubuntu-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Install Go
+        if: success()
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Build
+        run: go build
+      - name: Run tests
+        run: go test ./... -v -covermode=count
+
+  build-debian-11:
+    needs: test
+    runs-on: ubuntu-latest
+    container:
+      image: debian:11
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install dependencies and Go
+        run: |
+          apt-get update
+          apt-get install -y wget git gcc
+          wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz
+          tar -C /usr/local -xzf go1.24.4.linux-amd64.tar.gz
+          export PATH=$PATH:/usr/local/go/bin
+          go version
+      - name: Build
+        run: |
+          export PATH=$PATH:/usr/local/go/bin
+          go build -buildvcs=false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: junos_exporter
+          path: junos_exporter
+
+  publish-s3:
+    needs: build-debian-11
+    runs-on: ubuntu-latest
+
+    env:
+      S3_URL: ${{ vars.S3_URL }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: junos_exporter
+          path: .
+
+      - uses: actions/setup-python@v4
+
+      - name: Install awscli
+        run: pip install awscli
+
+      - name: Backup old S3 binary if exists
+        run: |
+          if aws s3 ls "s3://${S3_BUCKET}/public/junos_exporter/${GITHUB_REF_NAME}/junos_exporter" --endpoint-url https://${S3_URL}; then
+            ts=$(date +%Y%m%d%H%M%S)
+            aws s3 cp "s3://${S3_BUCKET}/public/junos_exporter/${GITHUB_REF_NAME}/junos_exporter" \
+              "s3://${S3_BUCKET}/public/junos_exporter/${GITHUB_REF_NAME}/junos_exporter_old${ts}" \
+              --endpoint-url https://${S3_URL}
+          fi
+
+      - name: publish binary to s3://${S3_BUCKET}/public/junos_exporter/${GITHUB_REF_NAME}/junos_exporter
+        run: |
+          aws s3 cp junos_exporter s3://${S3_BUCKET}/public/junos_exporter/${GITHUB_REF_NAME}/junos_exporter --endpoint-url https://${S3_URL}
