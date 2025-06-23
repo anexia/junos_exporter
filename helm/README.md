@@ -5,15 +5,20 @@
 ### Authentication
 
 #### SSH key authentication
-Add your ssh-keyfile and config.yml to values.yml
+Add your SSH key and `configyml` to `values.yml`.
 
-> sshkey is the base64 encoded id_rsa you want to use for authentication  
-> generate sshkey with `cat $HOME/.ssh/id_rsa | base64 -w0 && echo`
+`sshkey` is a base64-encoded SSH private key you want to use for authentication.
 
-`sshkey: QWRkIHlvdXIgb3duIGlkX3JzYSBoZXJl`
+You can generate an `sshkey` with `cat $HOME/.ssh/id_rsa | base64 -w0 && echo`:
+```yaml
+sshkey: QWRkIHlvdXIgb3duIGlkX3JzYSBoZXJl
+```
+
+It is also possible to use the existing-secret pattern (e.g. with ExternalSecrets operator),
+the secret with the SSH key should be mounted via `extraVolumes` and `extraVolumeMounts`.
 
 #### Password authentication
-To use password authentication the following values.yaml configuration could
+To use password authentication the following `values.yaml` configuration could
 be used with a `junos-exporter-ssh` secret object storing SSH secrets:
 
 ``` yaml
@@ -51,8 +56,22 @@ data:
 ```
 
 ### Devices configuration
-Add your devices to the devices in configyml in values.yml
+Add your devices to the devices in `configyml` in `values.yaml`
+
+### Handling configuration/authorization changes
+To force reload of the exporter pods upon `configyml` or `sshkey` configuration changes,
+enable the `rollOutJunosExporterPods` option in `values.yaml`.
+
+If Reloader controller is installed in the cluster, for `extraEnv` passwords or `extraVolumes` keys
+the `annotations` map in `values.yaml` can be used to specify a policy to handle the updates:
+
+```yaml
+annotations:
+  reloader.stakater.com/auto: "true"
+```
 
 ### Installation
-> cd helm  
-> helm install junosexporter ./junosexporter 
+```shell
+cd helm
+helm install junosexporter ./junosexporter
+```

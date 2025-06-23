@@ -3,11 +3,17 @@
 package main
 
 import (
+	"regexp"
+
+	"github.com/czerwonk/junos_exporter/pkg/features/ddosprotection"
+	"github.com/czerwonk/junos_exporter/pkg/features/poe"
+
 	"github.com/czerwonk/junos_exporter/internal/config"
 	"github.com/czerwonk/junos_exporter/pkg/collector"
 	"github.com/czerwonk/junos_exporter/pkg/connector"
 	"github.com/czerwonk/junos_exporter/pkg/features/accounting"
 	"github.com/czerwonk/junos_exporter/pkg/features/alarm"
+	"github.com/czerwonk/junos_exporter/pkg/features/arp"
 	"github.com/czerwonk/junos_exporter/pkg/features/bfd"
 	"github.com/czerwonk/junos_exporter/pkg/features/bgp"
 	"github.com/czerwonk/junos_exporter/pkg/features/environment"
@@ -18,10 +24,13 @@ import (
 	"github.com/czerwonk/junos_exporter/pkg/features/interfaces"
 	"github.com/czerwonk/junos_exporter/pkg/features/ipsec"
 	"github.com/czerwonk/junos_exporter/pkg/features/isis"
+	"github.com/czerwonk/junos_exporter/pkg/features/krt"
 	"github.com/czerwonk/junos_exporter/pkg/features/l2circuit"
+	"github.com/czerwonk/junos_exporter/pkg/features/l2vpn"
 	"github.com/czerwonk/junos_exporter/pkg/features/lacp"
 	"github.com/czerwonk/junos_exporter/pkg/features/ldp"
 	"github.com/czerwonk/junos_exporter/pkg/features/mac"
+	"github.com/czerwonk/junos_exporter/pkg/features/macsec"
 	"github.com/czerwonk/junos_exporter/pkg/features/mplslsp"
 	"github.com/czerwonk/junos_exporter/pkg/features/nat"
 	"github.com/czerwonk/junos_exporter/pkg/features/nat2"
@@ -37,36 +46,34 @@ import (
 	"github.com/czerwonk/junos_exporter/pkg/features/storage"
 	"github.com/czerwonk/junos_exporter/pkg/features/subscriber"
 	"github.com/czerwonk/junos_exporter/pkg/features/system"
+	"github.com/czerwonk/junos_exporter/pkg/features/twamp"
 	"github.com/czerwonk/junos_exporter/pkg/features/vpws"
 	"github.com/czerwonk/junos_exporter/pkg/features/vrrp"
-	"github.com/czerwonk/junos_exporter/pkg/interfacelabels"
 )
 
 type collectors struct {
 	logicalSystem string
-	dynamicLabels *interfacelabels.DynamicLabels
 	collectors    map[string]collector.RPCCollector
 	devices       map[string][]collector.RPCCollector
 	cfg           *config.Config
 }
 
-func collectorsForDevices(devices []*connector.Device, cfg *config.Config, logicalSystem string, dynamicLabels *interfacelabels.DynamicLabels) *collectors {
+func collectorsForDevices(devices []*connector.Device, cfg *config.Config, logicalSystem string) *collectors {
 	c := &collectors{
 		logicalSystem: logicalSystem,
-		dynamicLabels: dynamicLabels,
 		collectors:    make(map[string]collector.RPCCollector),
 		devices:       make(map[string][]collector.RPCCollector),
 		cfg:           cfg,
 	}
 
 	for _, d := range devices {
-		c.initCollectorsForDevices(d)
+		c.initCollectorsForDevices(d, deviceInterfaceRegex(cfg, d.Host))
 	}
 
 	return c
 }
 
-func (c *collectors) initCollectorsForDevices(device *connector.Device) {
+func (c *collectors) initCollectorsForDevices(device *connector.Device, descRe *regexp.Regexp) {
 	f := c.cfg.FeaturesForDevice(device.Host)
 
 	c.devices[device.Host] = make([]collector.RPCCollector, 0)
@@ -78,23 +85,24 @@ func (c *collectors) initCollectorsForDevices(device *connector.Device) {
 	})
 	c.addCollectorIfEnabledForDevice(device, "bfd", f.BFD, bfd.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "bgp", f.BGP, func() collector.RPCCollector {
-		return bgp.NewCollector(c.logicalSystem)
+		return bgp.NewCollector(c.logicalSystem, descRe)
 	})
 	c.addCollectorIfEnabledForDevice(device, "env", f.Environment, environment.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "firewall", f.Firewall, firewall.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "fpc", f.FPC, fpc.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "ifacediag", f.InterfaceDiagnostic, func() collector.RPCCollector {
-		return interfacediagnostics.NewCollector(c.dynamicLabels)
+		return interfacediagnostics.NewCollector(descRe)
 	})
 	c.addCollectorIfEnabledForDevice(device, "ifacequeue", f.InterfaceQueue, func() collector.RPCCollector {
-		return interfacequeue.NewCollector(c.dynamicLabels)
+		return interfacequeue.NewCollector(descRe)
 	})
 	c.addCollectorIfEnabledForDevice(device, "iface", f.Interfaces, func() collector.RPCCollector {
-		return interfaces.NewCollector(c.dynamicLabels)
+		return interfaces.NewCollector(descRe)
 	})
 	c.addCollectorIfEnabledForDevice(device, "ipsec", f.IPSec, ipsec.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "isis", f.ISIS, isis.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "l2c", f.L2Circuit, l2circuit.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "l2vpn", f.L2Vpn, l2vpn.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "lacp", f.LACP, lacp.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "ldp", f.LDP, ldp.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "nat", f.NAT, nat.NewCollector)
@@ -116,6 +124,12 @@ func (c *collectors) initCollectorsForDevices(device *connector.Device) {
 	c.addCollectorIfEnabledForDevice(device, "vpws", f.VPWS, vpws.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "mpls_lsp", f.MPLSLSP, mplslsp.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "subscriber", f.Subscriber, subscriber.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "macsec", f.MACSec, macsec.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "arp", f.ARP, arp.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "poe", f.Poe, poe.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "ddosprotection", f.DDOSProtection, ddosprotection.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "krt", f.KRT, krt.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "twamp", f.TWAMP, twamp.NewCollector)
 }
 
 func (c *collectors) addCollectorIfEnabledForDevice(device *connector.Device, key string, enabled bool, newCollector func() collector.RPCCollector) {

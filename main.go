@@ -15,16 +15,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/czerwonk/junos_exporter/pkg/connector"
-	"go.opentelemetry.io/otel/codes"
-
 	"github.com/czerwonk/junos_exporter/internal/config"
+	"github.com/czerwonk/junos_exporter/pkg/connector"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/codes"
+
 	log "github.com/sirupsen/logrus"
 )
 
-const version string = "0.12.3"
+const version string = "0.14.2"
 
 var (
 	showVersion                 = flag.Bool("version", false, "Print version information.")
@@ -45,6 +46,7 @@ var (
 	ospfEnabled                 = flag.Bool("ospf.enabled", true, "Scrape OSPFv3 metrics")
 	isisEnabled                 = flag.Bool("isis.enabled", false, "Scrape ISIS metrics")
 	l2circuitEnabled            = flag.Bool("l2circuit.enabled", false, "Scrape l2circuit metrics")
+	l2vpnEnabled                = flag.Bool("l2vpn.enabled", false, "Scrape l2vpn metrics")
 	natEnabled                  = flag.Bool("nat.enabled", false, "Scrape NAT metrics")
 	nat2Enabled                 = flag.Bool("nat2.enabled", false, "Scrape NAT2 metrics")
 	ldpEnabled                  = flag.Bool("ldp.enabled", true, "Scrape ldp metrics")
@@ -83,6 +85,11 @@ var (
 	tracingProvider             = flag.String("tracing.provider", "", "Sets the tracing provider (stdout or collector)")
 	tracingCollectorEndpoint    = flag.String("tracing.collector.grpc-endpoint", "", "Sets the tracing provider (stdout or collector)")
 	subscriberEnabled           = flag.Bool("subscriber.enabled", false, "Scrape subscribers detail")
+	macsecEnabled               = flag.Bool("macsec.enabled", true, "Scrape MACSec metrics")
+	arpEnabled                  = flag.Bool("arps.enabled", true, "Scrape ARP metrics")
+	poeEnabled                  = flag.Bool("poe.enabled", true, "Scrape PoE metrics")
+	krtEnabled                  = flag.Bool("krt.enabled", false, "Scrape KRT queue metrics")
+	twampEnabled                = flag.Bool("twamp.enabled", false, "Scrape TWAMP metrics")
 	cfg                         *config.Config
 	devices                     []*connector.Device
 	connManager                 *connector.SSHConnectionManager
@@ -120,12 +127,12 @@ func main() {
 	}
 	defer shutdownTracing()
 
-	initChannels()
+	initChannels(ctx)
 
 	startServer()
 }
 
-func initChannels() {
+func initChannels(ctx context.Context) {
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 
@@ -149,13 +156,19 @@ func initChannels() {
 				} else {
 					rc <- nil
 				}
+			case <-ctx.Done():
+				shutdown()
 			case <-term:
-				log.Infoln("Closing connections to devices")
-				connManager.Close()
-				os.Exit(0)
+				shutdown()
 			}
 		}
 	}()
+}
+
+func shutdown() {
+	log.Infoln("Closing connections to devices")
+	connManager.CloseAll()
+	os.Exit(0)
 }
 
 func printVersion() {
@@ -187,7 +200,7 @@ func reinitialize() error {
 	defer configMu.Unlock()
 
 	if connManager != nil {
-		connManager.Close()
+		connManager.CloseAll()
 		connManager = nil
 	}
 
@@ -205,14 +218,14 @@ func loadConfig() (*config.Config, error) {
 		return nil, err
 	}
 
-	return config.Load(bytes.NewReader(b))
+	return config.Load(bytes.NewReader(b), *dynamicIfaceLabels)
 }
 
 func loadConfigFromFlags() *config.Config {
 	c := config.New()
 	c.Targets = strings.Split(*sshHosts, ",")
 	c.LSEnabled = *lsEnabled
-	c.IfDescReg = *interfaceDescriptionRegex
+	c.IfDescReStr = *interfaceDescriptionRegex
 
 	f := &c.Features
 	f.Alarm = *alarmEnabled
@@ -231,6 +244,7 @@ func loadConfigFromFlags() *config.Config {
 	f.OSPF = *ospfEnabled
 	f.LDP = *ldpEnabled
 	f.L2Circuit = *l2circuitEnabled
+	f.L2Vpn = *l2vpnEnabled
 	f.Routes = *routesEnabled
 	f.RoutingEngine = *routingEngineEnabled
 	f.Accounting = *accountingEnabled
@@ -247,6 +261,11 @@ func loadConfigFromFlags() *config.Config {
 	f.MPLSLSP = *mplsLSPEnabled
 	f.License = *licenseEnabled
 	f.Subscriber = *subscriberEnabled
+	f.MACSec = *macsecEnabled
+	f.ARP = *arpEnabled
+	f.Poe = *poeEnabled
+	f.KRT = *krtEnabled
+	f.TWAMP = *twampEnabled
 	return c
 }
 
@@ -319,9 +338,10 @@ func handleMetricsRequest(w http.ResponseWriter, r *http.Request) {
 
 	logicalSystem := r.URL.Query().Get("ls")
 	if !cfg.LSEnabled && logicalSystem != "" {
+		err := fmt.Errorf("Logical systems not enabled but the logical system '%s' in parameters", logicalSystem)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		http.Error(w, fmt.Sprintf("Logical systems not enabled but the logical system '%s' in parameters", logicalSystem), 400)
+		http.Error(w, err.Error(), 400)
 		return
 	}
 
@@ -333,7 +353,8 @@ func handleMetricsRequest(w http.ResponseWriter, r *http.Request) {
 
 	promhttp.HandlerFor(reg, promhttp.HandlerOpts{
 		ErrorLog:      l,
-		ErrorHandling: promhttp.ContinueOnError}).ServeHTTP(w, r)
+		ErrorHandling: promhttp.ContinueOnError,
+	}).ServeHTTP(w, r)
 }
 
 func devicesForRequest(r *http.Request) ([]*connector.Device, error) {
