@@ -47,6 +47,7 @@ jobs:
       - name: Build
         run: |
           export PATH=$PATH:/usr/local/go/bin
+          export GODEBUG=netdns=cgo # force native dns resolver
           go build -buildvcs=false
       - uses: actions/upload-artifact@v4
         with:
