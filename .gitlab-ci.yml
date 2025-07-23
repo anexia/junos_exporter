@@ -1,0 +1,30 @@
+---
+include:
+  - project: neteng/c6e/ci_patterns
+    ref: 8-stable
+    file:
+      - go/test/go-test.yml
+      - docker/publish/docker_image.yml
+
+stages:
+  - analyze
+  - test
+  - build
+  - publish
+
+variables:
+  C6E_SOURCE__PROJECT_ID: 1240
+  CI_GOVERSION: "1.24"
+  PUBLISH__DOCKER_IMAGE__IMAGE_NAME: anx-cr.io/d35-ne-public/junos_exporter
+  PUBLISH__DOCKER_IMAGE__HARBOR_ROBOT_NAME: robot_d35-ne-public+gitlab-push
+  PUBLISH__DOCKER_IMAGE__PERSISTENT_TAG_BRANCHES: "internal/main,internal/prod"
+  PUBLISH__DOCKER_IMAGE__ENABLE_TAG: "true"
+  PUBLISH__DOCKER_IMAGE__EXTRA_BUILD_ARGS: ""
+
+publish-docker-image:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "internal/prod"
+      when: manual
+    - if: $CI_COMMIT_BRANCH == "internal/main"
