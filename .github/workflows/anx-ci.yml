@@ -12,17 +12,17 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: ["1.24.x"]
+        go-version: ["1.26.x"]
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Install Go
         if: success()
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Build
         run: go build
       - name: Run tests
@@ -35,13 +35,13 @@ jobs:
       image: debian:11
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install dependencies and Go
         run: |
           apt-get update
           apt-get install -y wget git gcc
-          wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz
-          tar -C /usr/local -xzf go1.24.4.linux-amd64.tar.gz
+          wget https://go.dev/dl/go1.26.4.linux-amd64.tar.gz
+          tar -C /usr/local -xzf go1.26.4.linux-amd64.tar.gz
           export PATH=$PATH:/usr/local/go/bin
           go version
       - name: Build
@@ -49,7 +49,7 @@ jobs:
           export PATH=$PATH:/usr/local/go/bin
           export GODEBUG=netdns=cgo # force native dns resolver
           go build -buildvcs=false
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: junos_exporter
           path: junos_exporter
@@ -65,14 +65,14 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: junos_exporter
           path: .
 
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v6
 
       - name: Install awscli
         run: pip install awscli
