@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log"
+
 	"github.com/czerwonk/junos_exporter/pkg/connector"
 )
 
@@ -27,9 +28,9 @@ func WithSatellite() ClientOption {
 }
 
 func WithLicenseInformation() ClientOption {
-  return func(cl *Client) {
-    cl.license = true
-  }
+	return func(cl *Client) {
+		cl.license = true
+	}
 }
 
 // Client sends commands to JunOS and parses results
@@ -52,7 +53,7 @@ func NewClient(ssh *connector.SSHConnection, opts ...ClientOption) *Client {
 }
 
 // RunCommandAndParse runs a command on JunOS and unmarshals the XML result
-func (c *Client) RunCommandAndParse(cmd string, obj interface{}) error {
+func (c *Client) RunCommandAndParse(cmd string, obj any) error {
 	return c.RunCommandAndParseWithParser(cmd, func(b []byte) error {
 		return xml.Unmarshal(b, obj)
 	})
@@ -82,7 +83,7 @@ func (c *Client) Device() *connector.Device {
 	return c.conn.Device()
 }
 
-// IsSatelliteEnabled returns if sattelite features are enabled on the device
+// IsSatelliteEnabled returns if satellite features are enabled on the device
 func (c *Client) IsSatelliteEnabled() bool {
 	return c.satellite
 }

@@ -57,6 +57,8 @@ var (
 	licenseNeededDesc    *prometheus.Desc
 	licenseExpiryDesc    *prometheus.Desc
 
+	commitInfoDesc *prometheus.Desc
+
 	// regex
 	regex1Ints        *regexp.Regexp = regexp.MustCompile(`^(\d+).*`)
 	regex2Ints        *regexp.Regexp = regexp.MustCompile(`^(\d+)\/(\d+).*`)
@@ -72,6 +74,8 @@ func init() {
 	var l []string
 
 	l = []string{"target"}
+	commitInfoDesc = prometheus.NewDesc(prefix+"system_commit_time", "Unix timestamp of last commit", l, nil)
+
 	mbufsCurrentDesc = prometheus.NewDesc(prefix+"mbufs_bytes_current", "Current number of bytes in mbufs", l, nil)
 	mbufsCacheDesc = prometheus.NewDesc(prefix+"mbufs_bytes_cache", "Cached number of bytes in mbufs", l, nil)
 	mbufsTotalDesc = prometheus.NewDesc(prefix+"mbufs_bytes_total", "Total nuumber of bytes in mbufs", l, nil)
@@ -117,7 +121,7 @@ func init() {
 
 // NewCollector creates a new collector
 func NewCollector() collector.RPCCollector {
-	return &systemCollector{}
+	return new(systemCollector)
 }
 
 // Name returns the name of the collector
@@ -154,19 +158,11 @@ func (*systemCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- licenseInstalledDesc
 	ch <- licenseNeededDesc
 	ch <- licenseExpiryDesc
+	ch <- commitInfoDesc
 }
 
 // Collect collects metrics from JunOS
 func (c *systemCollector) Collect(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) error {
-	err := c.CollectSystem(client, ch, labelValues)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *systemCollector) CollectSystem(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) error {
 	err := c.collectBuffers(client, ch, labelValues)
 	if err != nil {
 		return fmt.Errorf("could not get system buffers: %w", err)
@@ -185,11 +181,16 @@ func (c *systemCollector) CollectSystem(client collector.Client, ch chan<- prome
 		c.collectLicense(client, ch, labelValues)
 	}
 
+	err = c.collectCommit(client, ch, labelValues)
+	if err != nil {
+		return fmt.Errorf("unable to collect commit information: %w", err)
+	}
+
 	return nil
 }
 
 func (c *systemCollector) collectBuffers(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) error {
-	r := &buffers{}
+	r := new(buffers)
 
 	err := client.RunCommandAndParseWithParser("show system buffers", func(b []byte) error {
 		if string(b[:]) == "\nerror: syntax error, expecting <command>: buffers\n" || strings.Contains(string(b[:]), "error: command is not valid on the") {
@@ -411,7 +412,7 @@ func (c *systemCollector) collectBuffers(client collector.Client, ch chan<- prom
 }
 
 func (c *systemCollector) collectSystemInformation(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) error {
-	r := &systemInformation{}
+	r := new(systemInformation)
 	err := client.RunCommandAndParse("show system information", r)
 	if err != nil {
 		return err
@@ -431,7 +432,7 @@ func (c *systemCollector) collectSystemInformation(client collector.Client, ch c
 }
 
 func (c *systemCollector) collectSatelites(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) {
-	r := &satelliteChassis{}
+	r := new(satelliteChassis)
 	err := client.RunCommandAndParse("show chassis satellite detail", r)
 	if err != nil {
 		// there are various error messages when satellite is not enabled; thus here we just ignore the error and continue
@@ -454,7 +455,7 @@ func (c *systemCollector) collectSatelites(client collector.Client, ch chan<- pr
 }
 
 func (c *systemCollector) collectLicense(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) {
-	r := &licenseInformation{}
+	r := new(licenseInformation)
 	err := client.RunCommandAndParse("show system license usage", r)
 
 	if err != nil {
@@ -484,4 +485,20 @@ func (c *systemCollector) collectLicense(client collector.Client, ch chan<- prom
 			}
 		}
 	}
+}
+
+func (c *systemCollector) collectCommit(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) error {
+	sc := new(systemCommit)
+	err := client.RunCommandAndParse("show system commit", sc)
+	if err != nil {
+		return err
+	}
+
+	for _, che := range sc.CommitInfo.CommitHistory {
+		if che.SequenceNumber == 0 {
+			ch <- prometheus.MustNewConstMetric(commitInfoDesc, prometheus.GaugeValue, float64(che.DateTime.Seconds), labelValues...)
+		}
+	}
+
+	return nil
 }

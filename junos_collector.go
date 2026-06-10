@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"regexp"
 	"sync"
 	"time"
@@ -76,6 +78,26 @@ func deviceInterfaceRegex(cfg *config.Config, host string) *regexp.Regexp {
 	return dynamiclabels.DefaultInterfaceDescRegex()
 }
 
+func deviceInterfaceNameRegex(cfg *config.Config, host string) string {
+	dc := cfg.FindDeviceConfig(host)
+
+	if dc != nil && dc.InterfaceNameRegex != "" {
+		return dc.InterfaceNameRegex
+	}
+
+	return cfg.InterfaceNameRegex
+}
+
+func deviceFirewallFilterNameRegex(cfg *config.Config, host string) string {
+	dc := cfg.FindDeviceConfig(host)
+
+	if dc != nil && dc.FirewallFilterNameRegex != "" {
+		return dc.FirewallFilterNameRegex
+	}
+
+	return cfg.FirewallFilterNameRegex
+}
+
 func clientForDevice(device *connector.Device, connManager *connector.SSHConnectionManager) (*rpc.Client, error) {
 	conn, err := connManager.GetSSHConnection(device)
 	if err != nil {
@@ -115,18 +137,16 @@ func (c *junosCollector) Collect(ch chan<- prometheus.Metric) {
 	ctx, span := tracer.Start(c.ctx, "Collect")
 	defer span.End()
 
-	wg := &sync.WaitGroup{}
-
-	wg.Add(len(c.devices))
+	var wg sync.WaitGroup
 	for _, d := range c.devices {
-		go c.collectForHost(ctx, d, ch, wg)
+		wg.Go(func() {
+			c.collectForHost(ctx, d, ch)
+		})
 	}
-
 	wg.Wait()
 }
 
-func (c *junosCollector) collectForHost(ctx context.Context, device *connector.Device, ch chan<- prometheus.Metric, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (c *junosCollector) collectForHost(ctx context.Context, device *connector.Device, ch chan<- prometheus.Metric) {
 
 	ctx, span := tracer.Start(ctx, "CollectForHost", trace.WithAttributes(
 		attribute.String("host", device.Host),
@@ -161,7 +181,7 @@ func (c *junosCollector) collectForHost(ctx context.Context, device *connector.D
 		ct := time.Now()
 		err := col.Collect(cta, ch, l)
 
-		if err != nil && err.Error() != "EOF" {
+		if err != nil && !errors.Is(err, io.EOF) {
 			sp.RecordError(err)
 			sp.SetStatus(codes.Error, err.Error())
 			log.Errorln(col.Name() + ": " + err.Error())

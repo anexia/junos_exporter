@@ -6,8 +6,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/czerwonk/junos_exporter/pkg/connector"
-	"github.com/czerwonk/junos_exporter/pkg/rpc"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -21,6 +19,9 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/czerwonk/junos_exporter/pkg/connector"
+	"github.com/czerwonk/junos_exporter/pkg/rpc"
 )
 
 var tracer = otel.GetTracerProvider().Tracer(
@@ -114,7 +115,7 @@ type clientTracingAdapter struct {
 }
 
 // RunCommandAndParse implements RunCommandAndParse of the collector.Client interface
-func (cta *clientTracingAdapter) RunCommandAndParse(cmd string, obj interface{}) error {
+func (cta *clientTracingAdapter) RunCommandAndParse(cmd string, obj any) error {
 	return cta.cl.RunCommandAndParse(cmd, obj)
 }
 

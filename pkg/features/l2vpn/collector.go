@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package l2vpn
 
 import (
@@ -68,7 +70,7 @@ type l2vpnCollector struct {
 
 // NewCollector creates a new collector
 func NewCollector() collector.RPCCollector {
-	return &l2vpnCollector{}
+	return new(l2vpnCollector)
 }
 
 // Name returns the name of the collector
@@ -96,7 +98,7 @@ func (c *l2vpnCollector) collectl2vpnMetrics(client collector.Client, ch chan<- 
 
 	instances := x.Information.RoutingInstances
 
-	for i := 0; i < len(instances); i++ {
+	for i := range instances {
 		connCount := 0
 		for s := 0; s < len(instances[i].ReferenceSite); s++ {
 			connCount += +len(instances[i].ReferenceSite[s].Connections)
