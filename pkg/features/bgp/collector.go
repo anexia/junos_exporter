@@ -36,7 +36,7 @@ type description struct {
 }
 
 func newDescriptions(dynLabels dynamiclabels.Labels) *description {
-	d := &description{}
+	d := new(description)
 
 	l := []string{"target", "asn", "ip", "description", "group"}
 	l = append(l, dynLabels.Keys()...)
@@ -107,20 +107,38 @@ func (*bgpCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect collects metrics from JunOS
 func (c *bgpCollector) Collect(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) error {
-	err := c.collect(client, ch, labelValues)
+	groups, err := c.collectGroups(client)
+	if err != nil {
+		return fmt.Errorf("could not retrieve BGP group information: %w", err)
+	}
+
+	var x result
+	var cmd strings.Builder
+	cmd.WriteString("show bgp neighbor")
+	if c.LogicalSystem != "" {
+		cmd.WriteString(" logical-system ")
+		cmd.WriteString(c.LogicalSystem)
+	}
+
+	err = client.RunCommandAndParse(cmd.String(), &x)
 	if err != nil {
 		return err
+	}
+
+	for _, peer := range x.Information.Peers {
+		c.collectForPeer(peer, groups, ch, labelValues)
 	}
 
 	return nil
 }
 
 func (c *bgpCollector) collectGroups(client collector.Client) (groupMap, error) {
-	var x = groupResult{}
+	var x groupResult
 	var cmd strings.Builder
 	cmd.WriteString("show bgp group")
 	if c.LogicalSystem != "" {
-		cmd.WriteString(" logical-system " + c.LogicalSystem)
+		cmd.WriteString(" logical-system ")
+		cmd.WriteString(c.LogicalSystem)
 	}
 
 	err := client.RunCommandAndParse(cmd.String(), &x)
@@ -134,31 +152,6 @@ func (c *bgpCollector) collectGroups(client collector.Client) (groupMap, error) 
 	}
 
 	return groups, err
-}
-
-func (c *bgpCollector) collect(client collector.Client, ch chan<- prometheus.Metric, labelValues []string) error {
-	groups, err := c.collectGroups(client)
-	if err != nil {
-		return fmt.Errorf("could not retrieve BGP group information: %w", err)
-	}
-
-	var x = result{}
-	var cmd strings.Builder
-	cmd.WriteString("show bgp neighbor")
-	if c.LogicalSystem != "" {
-		cmd.WriteString(" logical-system " + c.LogicalSystem)
-	}
-
-	err = client.RunCommandAndParse(cmd.String(), &x)
-	if err != nil {
-		return err
-	}
-
-	for _, peer := range x.Information.Peers {
-		c.collectForPeer(peer, groups, ch, labelValues)
-	}
-
-	return nil
 }
 
 func (c *bgpCollector) collectForPeer(p peer, groups groupMap, ch chan<- prometheus.Metric, labelValues []string) {
@@ -204,25 +197,25 @@ func (c *bgpCollector) collectForPeer(p peer, groups groupMap, ch chan<- prometh
 }
 
 func (*bgpCollector) collectRIBForPeer(p peer, ch chan<- prometheus.Metric, labelValues []string, d *description) {
-	var rib_name string
+	var ribName string
 
 	// derive the name of the rib for which the prefix limit is configured by examining the NLRI type
-	switch nlri_type := p.OptionInformation.PrefixLimit.NlriType; nlri_type {
+	switch nlriType := p.OptionInformation.PrefixLimit.NlriType; nlriType {
 	case "inet-unicast":
-		rib_name = "inet.0"
+		ribName = "inet.0"
 	case "inet6-unicast":
-		rib_name = "inet6.0"
+		ribName = "inet6.0"
 	default:
-		rib_name = ""
+		ribName = ""
 	}
 
 	// if the prefix limit is configured inside a routing instance we need to prepend the RTI name to the rib name
-	if p.CFGRTI != "" && p.CFGRTI != "master" && rib_name != "" {
-		rib_name = p.CFGRTI + "." + rib_name
+	if p.CFGRTI != "" && p.CFGRTI != "master" && ribName != "" {
+		ribName = p.CFGRTI + "." + ribName
 	}
 
 	if p.OptionInformation.PrefixLimit.PrefixCount > 0 {
-		ch <- prometheus.MustNewConstMetric(d.prefixesLimitCountDesc, prometheus.GaugeValue, float64(p.OptionInformation.PrefixLimit.PrefixCount), append(labelValues, rib_name)...)
+		ch <- prometheus.MustNewConstMetric(d.prefixesLimitCountDesc, prometheus.GaugeValue, float64(p.OptionInformation.PrefixLimit.PrefixCount), append(labelValues, ribName)...)
 	}
 
 	for _, rib := range p.RIBs {
@@ -233,7 +226,7 @@ func (*bgpCollector) collectRIBForPeer(p peer, ch chan<- prometheus.Metric, labe
 		ch <- prometheus.MustNewConstMetric(d.activePrefixesDesc, prometheus.GaugeValue, float64(rib.ActivePrefixes), l...)
 		ch <- prometheus.MustNewConstMetric(d.advertisedPrefixesDesc, prometheus.GaugeValue, float64(rib.AdvertisedPrefixes), l...)
 
-		if rib.Name == rib_name {
+		if rib.Name == ribName {
 			if p.OptionInformation.PrefixLimit.PrefixCount > 0 {
 				prefixesLimitPercent := float64(rib.ReceivedPrefixes) / float64(p.OptionInformation.PrefixLimit.PrefixCount)
 				ch <- prometheus.MustNewConstMetric(d.prefixesLimitPercentageDesc, prometheus.GaugeValue, math.Round(prefixesLimitPercent*100)/100, l...)
