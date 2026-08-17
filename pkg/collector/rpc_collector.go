@@ -13,12 +13,12 @@ import (
 
 type Client interface {
 	// RunCommandAndParse runs a command on JunOS and unmarshals the XML result
-	RunCommandAndParse(cmd string, obj interface{}) error
+	RunCommandAndParse(cmd string, obj any) error
 
 	// RunCommandAndParseWithParser runs a command on JunOS and unmarshals the XML result using the specified parser function
 	RunCommandAndParseWithParser(cmd string, parser rpc.Parser) error
 
-	// IsSatelliteEnabled returns if sattelite features are enabled on the device
+	// IsSatelliteEnabled returns if satellite features are enabled on the device
 	IsSatelliteEnabled() bool
 
 	IsScrapingLicenseEnabled() bool

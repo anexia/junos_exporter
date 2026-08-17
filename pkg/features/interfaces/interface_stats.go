@@ -9,8 +9,10 @@ type interfaceStats struct {
 	ErrorStatus             bool
 	Description             string
 	Mac                     string
+	SnmpIndex               string
 	IsPhysical              bool
 	Speed                   string
+	IfSpeedCfg              string
 	BPDUError               bool
 	ReceiveBytes            float64
 	ReceivePackets          float64

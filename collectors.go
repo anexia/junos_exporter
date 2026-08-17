@@ -4,6 +4,8 @@ package main
 
 import (
 	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/czerwonk/junos_exporter/pkg/features/ddosprotection"
 	"github.com/czerwonk/junos_exporter/pkg/features/poe"
@@ -16,7 +18,11 @@ import (
 	"github.com/czerwonk/junos_exporter/pkg/features/arp"
 	"github.com/czerwonk/junos_exporter/pkg/features/bfd"
 	"github.com/czerwonk/junos_exporter/pkg/features/bgp"
+	"github.com/czerwonk/junos_exporter/pkg/features/cluster"
+	"github.com/czerwonk/junos_exporter/pkg/features/dot1x"
 	"github.com/czerwonk/junos_exporter/pkg/features/environment"
+	"github.com/czerwonk/junos_exporter/pkg/features/evpn"
+	"github.com/czerwonk/junos_exporter/pkg/features/evpnipprefix"
 	"github.com/czerwonk/junos_exporter/pkg/features/firewall"
 	"github.com/czerwonk/junos_exporter/pkg/features/fpc"
 	"github.com/czerwonk/junos_exporter/pkg/features/interfacediagnostics"
@@ -29,11 +35,14 @@ import (
 	"github.com/czerwonk/junos_exporter/pkg/features/l2vpn"
 	"github.com/czerwonk/junos_exporter/pkg/features/lacp"
 	"github.com/czerwonk/junos_exporter/pkg/features/ldp"
+	"github.com/czerwonk/junos_exporter/pkg/features/lldp"
 	"github.com/czerwonk/junos_exporter/pkg/features/mac"
 	"github.com/czerwonk/junos_exporter/pkg/features/macsec"
+	"github.com/czerwonk/junos_exporter/pkg/features/mnha"
 	"github.com/czerwonk/junos_exporter/pkg/features/mplslsp"
 	"github.com/czerwonk/junos_exporter/pkg/features/nat"
 	"github.com/czerwonk/junos_exporter/pkg/features/nat2"
+	"github.com/czerwonk/junos_exporter/pkg/features/ntp"
 	"github.com/czerwonk/junos_exporter/pkg/features/ospf"
 	"github.com/czerwonk/junos_exporter/pkg/features/power"
 	"github.com/czerwonk/junos_exporter/pkg/features/route"
@@ -46,7 +55,10 @@ import (
 	"github.com/czerwonk/junos_exporter/pkg/features/storage"
 	"github.com/czerwonk/junos_exporter/pkg/features/subscriber"
 	"github.com/czerwonk/junos_exporter/pkg/features/system"
+	"github.com/czerwonk/junos_exporter/pkg/features/systemstatistics"
 	"github.com/czerwonk/junos_exporter/pkg/features/twamp"
+	"github.com/czerwonk/junos_exporter/pkg/features/ufd"
+	"github.com/czerwonk/junos_exporter/pkg/features/virtualchassis"
 	"github.com/czerwonk/junos_exporter/pkg/features/vpws"
 	"github.com/czerwonk/junos_exporter/pkg/features/vrrp"
 )
@@ -83,12 +95,20 @@ func (c *collectors) initCollectorsForDevices(device *connector.Device, descRe *
 	c.addCollectorIfEnabledForDevice(device, "alarm", f.Alarm, func() collector.RPCCollector {
 		return alarm.NewCollector(*alarmFilter)
 	})
+	c.addCollectorIfEnabledForDevice(device, "ntp", f.NTP, func() collector.RPCCollector {
+		return ntp.NewCollector()
+	})
 	c.addCollectorIfEnabledForDevice(device, "bfd", f.BFD, bfd.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "bgp", f.BGP, func() collector.RPCCollector {
 		return bgp.NewCollector(c.logicalSystem, descRe)
 	})
+	c.addCollectorIfEnabledForDevice(device, "dot1x", f.DOT1X, dot1x.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "env", f.Environment, environment.NewCollector)
-	c.addCollectorIfEnabledForDevice(device, "firewall", f.Firewall, firewall.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "evpn", f.EVPN, evpn.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "evpn_ip_prefix", f.EVPNIPPrefix, evpnipprefix.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "firewall", f.Firewall, func() collector.RPCCollector {
+		return firewall.NewCollector(deviceFirewallFilterNameRegex(c.cfg, device.Host))
+	})
 	c.addCollectorIfEnabledForDevice(device, "fpc", f.FPC, fpc.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "ifacediag", f.InterfaceDiagnostic, func() collector.RPCCollector {
 		return interfacediagnostics.NewCollector(descRe)
@@ -97,7 +117,7 @@ func (c *collectors) initCollectorsForDevices(device *connector.Device, descRe *
 		return interfacequeue.NewCollector(descRe)
 	})
 	c.addCollectorIfEnabledForDevice(device, "iface", f.Interfaces, func() collector.RPCCollector {
-		return interfaces.NewCollector(descRe)
+		return interfaces.NewCollector(descRe, deviceInterfaceNameRegex(c.cfg, device.Host))
 	})
 	c.addCollectorIfEnabledForDevice(device, "ipsec", f.IPSec, ipsec.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "isis", f.ISIS, isis.NewCollector)
@@ -105,6 +125,7 @@ func (c *collectors) initCollectorsForDevices(device *connector.Device, descRe *
 	c.addCollectorIfEnabledForDevice(device, "l2vpn", f.L2Vpn, l2vpn.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "lacp", f.LACP, lacp.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "ldp", f.LDP, ldp.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "lldp", f.LLDP, lldp.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "nat", f.NAT, nat.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "nat2", f.NAT2, nat2.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "ospf", f.OSPF, func() collector.RPCCollector {
@@ -113,6 +134,7 @@ func (c *collectors) initCollectorsForDevices(device *connector.Device, descRe *
 	c.addCollectorIfEnabledForDevice(device, "routes", f.Routes, route.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "rpki", f.RPKI, rpki.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "rpm", f.RPM, rpm.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "cluster", f.Cluster, cluster.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "security", f.Security, security.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "security_ike", f.SecurityIKE, securityike.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "security_policies", f.SecurityPolicies, securitypolicies.NewCollector)
@@ -120,6 +142,7 @@ func (c *collectors) initCollectorsForDevices(device *connector.Device, descRe *
 	c.addCollectorIfEnabledForDevice(device, "system", (f.System || f.License), system.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "power", f.Power, power.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "mac", f.MAC, mac.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "virtual_chassis", f.VirtualChassis, virtualchassis.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "vrrp", f.VRRP, vrrp.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "vpws", f.VPWS, vpws.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "mpls_lsp", f.MPLSLSP, mplslsp.NewCollector)
@@ -130,6 +153,17 @@ func (c *collectors) initCollectorsForDevices(device *connector.Device, descRe *
 	c.addCollectorIfEnabledForDevice(device, "ddosprotection", f.DDOSProtection, ddosprotection.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "krt", f.KRT, krt.NewCollector)
 	c.addCollectorIfEnabledForDevice(device, "twamp", f.TWAMP, twamp.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "system_statistics", f.SystemStatistics, systemstatistics.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "ufd", f.UFD, ufd.NewCollector)
+	c.addCollectorIfEnabledForDevice(device, "mnha", f.MNHA, func() collector.RPCCollector {
+		srgIDs := deviceMNHASRGIDs(c.cfg, device.Host)
+		if srgIDs == "" {
+			srgIDs = *mnhaSRGIDs
+		}
+
+		return mnha.NewCollector(parseMNHASRGIDs(srgIDs))
+	})
+
 }
 
 func (c *collectors) addCollectorIfEnabledForDevice(device *connector.Device, key string, enabled bool, newCollector func() collector.RPCCollector) {
@@ -137,22 +171,25 @@ func (c *collectors) addCollectorIfEnabledForDevice(device *connector.Device, ke
 		return
 	}
 
-	col, found := c.collectors[key]
+	colKey := key + "_" + device.Host
+	col, found := c.collectors[colKey]
 	if !found {
 		col = newCollector()
-		c.collectors[key] = col
+		c.collectors[colKey] = col
 	}
 
 	c.devices[device.Host] = append(c.devices[device.Host], col)
 }
 
 func (c *collectors) allEnabledCollectors() []collector.RPCCollector {
-	collectors := make([]collector.RPCCollector, len(c.collectors))
+	collectors := make([]collector.RPCCollector, 0)
+	seen := make(map[string]bool)
 
-	i := 0
-	for _, collector := range c.collectors {
-		collectors[i] = collector
-		i++
+	for _, col := range c.collectors {
+		if !seen[col.Name()] {
+			seen[col.Name()] = true
+			collectors = append(collectors, col)
+		}
 	}
 
 	return collectors
@@ -165,4 +202,26 @@ func (c *collectors) collectorsForDevice(device *connector.Device) []collector.R
 	}
 
 	return cols
+}
+
+// parseMNHASRGIDs parses a comma-separated list of services-redundancy-group
+// IDs (e.g. "0,1,2"). Non-numeric entries are ignored.
+func parseMNHASRGIDs(s string) []int {
+	ids := make([]int, 0)
+
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		id, err := strconv.Atoi(part)
+		if err != nil {
+			continue
+		}
+
+		ids = append(ids, id)
+	}
+
+	return ids
 }

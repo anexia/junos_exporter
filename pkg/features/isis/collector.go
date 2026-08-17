@@ -3,10 +3,10 @@
 package isis
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/czerwonk/junos_exporter/pkg/collector"
@@ -61,7 +61,7 @@ type isisCollector struct {
 
 // NewCollector creates a new collector
 func NewCollector() collector.RPCCollector {
-	return &isisCollector{}
+	return new(isisCollector)
 }
 
 // Name returns the name of the collector
@@ -122,21 +122,21 @@ func (c *isisCollector) Collect(client collector.Client, ch chan<- prometheus.Me
 	var ifas interfaces
 	err = client.RunCommandAndParse("show isis interface extensive", &ifas)
 	if err != nil {
-		return errors.Wrap(err, "failed to run command 'show isis interface extensive'")
+		return fmt.Errorf("failed to run command 'show isis interface extensive': %w", err)
 	}
 	c.isisInterfaces(ifas, ch, labelValues)
 
 	var coverage backupCoverage
 	err = client.RunCommandAndParse("show isis backup coverage", &coverage)
 	if err != nil {
-		return errors.Wrap(err, "failed to run command 'show isis backup coverage'")
+		return fmt.Errorf("failed to run command 'show isis backup coverage': %w", err)
 	}
 	c.isisBackupCoverage(coverage, ch, labelValues)
 
 	var backupPath backupSPF
 	err = client.RunCommandAndParse("show isis backup spf results", &backupPath)
 	if err != nil {
-		return errors.Wrap(err, "failed to run command 'show isis backup spf results'")
+		return fmt.Errorf("failed to run command 'show isis backup spf results': %w", err)
 	}
 	c.isisBackupPath(backupPath, ch, labelValues)
 	return nil
@@ -146,7 +146,7 @@ func (c *isisCollector) isisAdjancies(client collector.Client) (*adjacencies, er
 	up := 0
 	total := 0
 
-	var x = result{}
+	var x result
 	err := client.RunCommandAndParse("show isis adjacency", &x)
 	if err != nil {
 		return nil, err
@@ -167,6 +167,7 @@ func (c *isisCollector) isisInterfaces(interfaces interfaces, ch chan<- promethe
 		if strings.ToLower(i.InterfaceLevelData.Passive) == "passive" {
 			continue
 		}
+
 		labels := append(labelValues,
 			i.InterfaceName,
 			i.InterfaceLevelData.Level)
@@ -175,6 +176,7 @@ func (c *isisCollector) isisInterfaces(interfaces interfaces, ch chan<- promethe
 		ch <- prometheus.MustNewConstMetric(adjMetricDesc, prometheus.GaugeValue, i.InterfaceLevelData.Metric, labels...)
 		ch <- prometheus.MustNewConstMetric(adjHelloTimerDesc, prometheus.GaugeValue, i.InterfaceLevelData.HelloTime, labels...)
 		ch <- prometheus.MustNewConstMetric(adjHoldTimerDesc, prometheus.GaugeValue, i.InterfaceLevelData.HoldTime, labels...)
+
 		additionaLabels := append(labelValues, i.InterfaceName)
 		helloPadding := getHelloPadding(i.HelloPadding)
 		ch <- prometheus.MustNewConstMetric(lspIntervalDesc, prometheus.GaugeValue, i.LSPInterval, additionaLabels...)
@@ -191,18 +193,22 @@ func (c *isisCollector) isisBackupCoverage(coverage backupCoverage, ch chan<- pr
 		compactCoverage.IsisRouteCoverageClns, compactCoverage.IsisRouteCoverageIpv4Mpls,
 		compactCoverage.IsisRouteCoverageIpv6Mpls, compactCoverage.IsisRouteCoverageIpv4MplsSspf,
 		compactCoverage.IsisRouteCoverageIpv6MplsSspf)
-	ch <- prometheus.MustNewConstMetric(nodeCoverageDesc, prometheus.GaugeValue, percentageToFloat64(compactCoverage.IsisNodeCoverage), labels...)
+
+	if len(compactCoverage.IsisNodeCoverage) > 0 {
+		ch <- prometheus.MustNewConstMetric(nodeCoverageDesc, prometheus.GaugeValue, percentageToFloat64(compactCoverage.IsisNodeCoverage), labels...)
+	}
 }
 
 func (c *isisCollector) isisBackupPath(backupPath backupSPF, ch chan<- prometheus.Metric, labelValues []string) {
 	for _, node := range backupPath.IsisSpfInformation.IsisSpf {
-		for _, bpSFPResult := range node.IsisBackupSpfResult {
-			for _, _ = range bpSFPResult.NoCoverageReasonElement {
-				labelValues := append(labelValues, strings.TrimSuffix(bpSFPResult.NodeID, ".00"), "", "")
-				ch <- prometheus.MustNewConstMetric(backupPathDesc, prometheus.GaugeValue, 0.0, labelValues...)
+		for _, spfResult := range node.IsisBackupSpfResult {
+			nodeID := strings.TrimSuffix(spfResult.NodeID, ".00")
+			for range spfResult.NoCoverageReasonElement {
+				l := append(labelValues, nodeID, "", "")
+				ch <- prometheus.MustNewConstMetric(backupPathDesc, prometheus.GaugeValue, 0.0, l...)
 			}
-			labelValues := append(labelValues, strings.TrimSuffix(bpSFPResult.NodeID, ".00"), bpSFPResult.BackupNextHopElement.IsisNextHop, bpSFPResult.BackupNextHopElement.InterfaceName)
-			ch <- prometheus.MustNewConstMetric(backupPathDesc, prometheus.GaugeValue, 1.0, labelValues...)
+			l := append(labelValues, nodeID, spfResult.BackupNextHopElement.IsisNextHop, spfResult.BackupNextHopElement.InterfaceName)
+			ch <- prometheus.MustNewConstMetric(backupPathDesc, prometheus.GaugeValue, 1.0, l...)
 		}
 	}
 }
@@ -226,8 +232,9 @@ func percentageToFloat64(percentageStr string) float64 {
 	trimmed := strings.TrimSuffix(percentageStr, "%")
 	value, err := strconv.ParseFloat(trimmed, 64)
 	if err != nil {
-		log.Errorf("failed to turn percentage value into float64: %v", err)
+		log.Warnf("failed to turn percentage value into float64: %v", err)
 		return 0
 	}
+
 	return value
 }

@@ -1,14 +1,17 @@
+// SPDX-License-Identifier: MIT
+
 package macsec
 
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 )
 
 func ParseShowSecurityMacsecConnections(input []byte) (*ShowSecMacsecConns, error) {
-	res := &ShowSecMacsecConns{}
+	res := new(ShowSecMacsecConns)
 
 	err := xml.Unmarshal(input, res)
 	if err != nil {
@@ -20,7 +23,7 @@ func ParseShowSecurityMacsecConnections(input []byte) (*ShowSecMacsecConns, erro
 	d := xml.NewDecoder(bytes.NewBuffer(res.InnerXML))
 	for {
 		t, err := d.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -73,7 +76,7 @@ func ParseShowSecurityMacsecConnections(input []byte) (*ShowSecMacsecConns, erro
 }
 
 func unmarshalMacsecInterfaceCommonInformation(d *xml.Decoder, start *xml.StartElement) (*MacsecInterfaceCommonInformation, error) {
-	mici := &MacsecInterfaceCommonInformation{}
+	mici := new(MacsecInterfaceCommonInformation)
 	err := d.DecodeElement(mici, start)
 	if err != nil {
 		return nil, err
@@ -83,7 +86,7 @@ func unmarshalMacsecInterfaceCommonInformation(d *xml.Decoder, start *xml.StartE
 }
 
 func unmarshalOutboundSecureChannel(d *xml.Decoder, start *xml.StartElement) (*OutboundSecureChannel, error) {
-	osc := &OutboundSecureChannel{}
+	osc := new(OutboundSecureChannel)
 	err := d.DecodeElement(osc, start)
 	if err != nil {
 		return nil, err
@@ -93,7 +96,7 @@ func unmarshalOutboundSecureChannel(d *xml.Decoder, start *xml.StartElement) (*O
 }
 
 func unmarshalInboundSecureChannel(d *xml.Decoder, start *xml.StartElement) (*InboundSecureChannel, error) {
-	isc := &InboundSecureChannel{}
+	isc := new(InboundSecureChannel)
 	err := d.DecodeElement(isc, start)
 	if err != nil {
 		return nil, err
